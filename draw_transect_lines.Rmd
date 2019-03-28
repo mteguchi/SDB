@@ -8,6 +8,7 @@ This document describes drawing transect lines within SDB for habitat sampling.
 First load necessary libraries.
 ```{r}
 rm(list=ls())
+save.image <- T
 ifelse(Sys.info()[1] == 'Linux',
        source('~/Documents/R/tools/TomosFunctions.R'),
        source('~/R/tools/TomosFunctions.R'))
@@ -18,7 +19,12 @@ library(geosphere)
 library(rgeos)
 library(tidyverse)
 
-dlines <- 25    # distance between lines in m
+dlines <- 100    # distance between lines in m
+min.length <- 500  # minimum line length in m
+
+water.color <- "lightblue"
+background.color <- "darkgray"
+eelgrass.color <- "lightgreen"
 
 ```
 
@@ -37,163 +43,118 @@ SDBay.df <- broom::tidy(SDBay.gis)
 ```
 
 
-First line is defined by selecting the northern most latitude and finding the longitude of the shore lines (both E and W). To do that, we use... over in sp package?
+First line is defined by selecting the northern most latitude for transect lines and finding the longitude of the shore lines (both E and W). This is completed by using gIntersection.  The while loop continues until the new latitude is south of the southern limit. 
 ```{r}
+# N most latitude for transect lines
+N.most.lat <- 32.660
+S.most.lat <- 32.604
 
+# approximate center of the study area
+center.latlon <- data.frame(long = -117.128, lat = 32.6411)
 
-# find N most E end along the shore line:
+# create a line along this latitude (longitude values are arbitrary: wide enough to cover SDB):
+N.most.line <- SpatialLines(list(Lines(list(Line(data.frame(long = c(-118, -116),
+                                                            lat = c(N.most.lat, N.most.lat)))), 
+                                       ID = "Reference")),
+                            proj4string = CRS("+proj=longlat +datum=WGS84"))
 
-N.most <- data.frame(long = -117.1480, lat = 32.6863)
-S.most <- data.frame(long = -117.1115, lat = 32.6059)
+# ends of the northern most line
+N.coords <- coordinates(gIntersection(SDBay.gis, N.most.line))
+N.coords.df <- data.frame(N.coords)
+#NE.coords <- N.coords.df[2,]
 
-rhumb.bear <- bearingRhumb(S.most, N.most)
+E.coords <- data.frame(long = N.coords.df[2, "x"],
+                       lat = N.coords.df[2, "y"])
 
-pt2.df <- data.frame(X = N.most$long, Y = N.most$lat)
+W.coords <- data.frame(long = N.coords.df[1, "x"],
+                       lat = N.coords.df[1, "y"])
 
-## draw transect lines:
-# find the distance between the N and S tips of the study area in m:
-dist_NS <- distGeo(N.most, S.most)
-nlines <- ceiling(dist_NS/dlines)
-k<-2
-for (k in 2:nlines){
-  # find two points on the next line
-  # Offshore
-  pt2.df[k,] <- destPointRhumb(pt2.df[k-1,], rhumb_bear-90, dlines*1000)
-  # Inshore - go long enough because it will be truncated later.
-  pt1.df[k,] <- destPointRhumb(pt2.df[k,], rhumb_bear-180, nm2km(60)*1000)
-  #pt1.df[k,] <- destPointRhumb(pt1.df[k-1,], rhumb_bear-90, dlines*1000)
-
-}
-
-pt1.df.sp <- latlon2sp(in.df = pt1.df, center.UTM = center.UTM)
-pt2.df.sp <- latlon2sp(in.df = pt2.df, center.UTM = center.UTM)
-
-# find intersections between lines and the outside boundary line:
-# Create Lines objects and put them in a list
-lines.list <- vector(mode = 'list', length = (nlines-1))
-k <- 2
-for (k in 2:nlines){
-  line1 <- as.matrix(rbind(pt1.df.sp@coords[k,],
-                           pt2.df.sp@coords[k,]))
-  lines.list[[k-1]] <- Lines(list(Line(line1)),
-                             ID = paste0('line', k))
-}
-
-# Create SpatialLines object
-line1.Sp <- SpatialLines(lines.list,
-                         proj4string = CRS("+proj=utm +zone=10 ellps=WGS84"))
-
-# use gIntersection to find intersections between lines and the polygon
-# This was a headache... found some code, which is saved in gIntersection_example.R
-edges <- coordinates(gIntersection(line1.Sp, search.area.Sp.poly))
-
-# create two empty data frames for begin and end points
-transect.begin.lines.Sp <- data.frame(X = NA,
-                                      Y = NA)
-transect.end.lines.Sp <- data.frame(X = NA,
-                                    Y = NA)
-
-# extract the edge points into the dataframes
-for (k in 1:length(edges[[1]])){
-  transect.begin.lines.Sp[k, 'X'] <- edges[[1]][[k]][1, 'x']
-  transect.begin.lines.Sp[k, 'Y'] <- edges[[1]][[k]][1, 'y']
-  transect.end.lines.Sp[k, 'X'] <- edges[[1]][[k]][2, 'x']
-  transect.end.lines.Sp[k, 'Y'] <- edges[[1]][[k]][2, 'y']
+lat <- E.coords$lat
+k <- 1
+while (lat > S.most.lat){
+  # find new latitude
+  tmp.pt <- data.frame(destPoint(E.coords[k, ], 180, dlines))
+  lat <- tmp.pt$lat
+  new.line <- SpatialLines(list(Lines(list(Line(data.frame(long = c(-118, -116),
+                                                           lat = c(lat, lat)))),
+                                      ID = "a")),
+                           proj4string = CRS("+proj=longlat +datum=WGS84"))
+  new.coords <- coordinates(gIntersection(SDBay.gis, new.line))
+  new.coords.df <- data.frame(new.coords)
+  
+  for (c in seq(1, ncol(new.coords.df), by = 2)){
+    k <- k + 1
+    W.coords[k, ] <- new.coords.df[1, c:(c+1)]
+    E.coords[k, ] <- new.coords.df[2, c:(c+1)]
+    
+  }
 
 }
 
-# flip the data frames upside down so they are numbered from north to south
-# apply converts dataframes into matrices so convert them bacck to
-# dataframes. Add the first line - the northern boundary line first.
-transect.begin.lines.Sp <- as.data.frame(apply(rbind(transect.begin.lines.Sp,
-                                                     pt1.df.sp@coords[1, ]), 2, rev))
-transect.end.lines.Sp <- as.data.frame(apply(rbind(transect.end.lines.Sp,
-                                                   pt2.df.sp@coords[1, ]), 2, rev))
+W.coords %>% transmute(long.W = long, lat.W = lat) -> W.coords
+E.coords %>% transmute( long.E = long, lat.E = lat) -> E.coords
 
-# convert these into spatial objects with appropriate projections
-coordinates(transect.begin.lines.Sp) <- c('X', 'Y')
-proj4string(transect.begin.lines.Sp) <- CRS("+proj=utm +zone=10 ellps=WGS84")
-coordinates(transect.end.lines.Sp) <- c('X', 'Y')
-proj4string(transect.end.lines.Sp) <- CRS("+proj=utm +zone=10 ellps=WGS84")
+# find distance between beginning and end:
+dist.line <- distHaversine(W.coords, E.coords)
 
-# convert them into lat/lon
-transect.begin.lines.latlon <- spTransform(transect.begin.lines.Sp,
-                                           CRS("+proj=longlat +datum=WGS84"))
+# get rid of those that are < min.length m, then reorder lat/lon so that I can copy and paste
+# in Google Earth to plot end points easily
 
-transect.end.lines.latlon <- spTransform(transect.end.lines.Sp,
-                                           CRS("+proj=longlat +datum=WGS84"))
+all.coords <- cbind(W.coords, E.coords, dist.line)
+all.coords %>% filter(dist.line > min.length) %>%
+  transmute(lat.W = lat.W, long.W = long.W,
+            lat.E = lat.E, long.E = long.E,
+            length = dist.line) -> survey.coords
 
-# combine them in one data frame along with track lines:
-transect.lines.latlon <- data.frame(lineID = 1:nrow(transect.begin.lines.Sp@coords),
-                                    latInshore = transect.begin.lines.latlon@coords[,'Y'],
-                                    lonInshore = transect.begin.lines.latlon@coords[,'X'],
-                                    latOffshore = transect.end.lines.latlon@coords[, 'Y'],
-                                    lonOffshore = transect.end.lines.latlon@coords[, 'X'])
+survey.coords$ID <- seq(1, nrow(survey.coords))
 
-# provide decimal degrees and decimal minutes in the output:
-transect.lines.latlon$degLatInshore <- trunc(transect.lines.latlon$latInshore)
-transect.lines.latlon$minLatInshore <- abs((transect.lines.latlon$latInshore - trunc(transect.lines.latlon$latInshore)) * 60)
-transect.lines.latlon$degLonInshore <- trunc(transect.lines.latlon$lonInshore)
-transect.lines.latlon$minLonInshore <- abs((transect.lines.latlon$lonInshore - trunc(transect.lines.latlon$lonInshore)) * 60)
+survey.coords %>% select(ID, lat.W, long.W, lat.E, long.E, length) -> survey.coords
+```
 
-transect.lines.latlon$degLatOffshore <- trunc(transect.lines.latlon$latOffshore)
-transect.lines.latlon$minLatOffshore <- abs((transect.lines.latlon$latOffshore - trunc(transect.lines.latlon$latOffshore)) * 60)
-transect.lines.latlon$degLonOffshore <- trunc(transect.lines.latlon$lonOffshore)
-transect.lines.latlon$minLonOffshore <- abs((transect.lines.latlon$lonOffshore - trunc(transect.lines.latlon$lonOffshore)) * 60)
+Once W and E ends are created, plot them on a map.
 
-transect.lines.latlon$distInNM <- km2nm(distGeo(transect.begin.lines.latlon@coords,
-                                                transect.end.lines.latlon@coords)/1000)
+```{r}
+water.gis <- spTransform(readOGR(dsn = "GISfiles",
+                                 layer = "water",
+                                 verbose = FALSE),
+                         CRS("+proj=longlat +datum=WGS84"))
 
-transect.lines.latlon$dist2MYF <- km2nm(distGeo(transect.begin.lines.latlon@coords,
-                                                MYF)/1000)
-transect.lines.latlon$dist2CRQ <- km2nm(distGeo(transect.begin.lines.latlon@coords,
-                                                CRQ)/1000)
-transect.lines.latlon$dist2RNM <- km2nm(distGeo(transect.begin.lines.latlon@coords,
-                                                RNM)/1000)
+water.df <- broom::tidy(water.gis)
 
-# the last one is in the bay - remove: (this may not happen when dline is changed)
-#transect.lines.latlon <- transect.lines.latlon[-12,]
 
 # make a plot
-p1 <- ggplot() +
-  geom_polygon(fill = land.color,
-               data = all.coast.line.df,
-               aes(x = X, y = Y, group = idx))  +
-  geom_polygon(data = search.area,
-               aes(x = X, y = Y),
-               fill = NA, size = 1.2,
-               alpha = 0.6,
-               color='black') +
-  geom_segment(data = transect.lines.latlon,
-               aes(x = lonInshore, y = latInshore,
-                   xend = lonOffshore, yend = latOffshore),
-               size = 0.9) +
-  geom_text(data = transect.lines.latlon,
-            aes(x = lonOffshore,
-                y = latOffshore, label = lineID),
-            color = 'red')+
-  coord_map() +
+p.1 <- ggplot() +
+ geom_polygon(data = water.df,
+               aes(x = long, y = lat, group = group),
+               fill = water.color,
+               color = "black") +
+  geom_polygon(data = SDBay.df,
+               aes(x = long, y = lat, group = group),
+               fill = water.color,
+               color = "black") +
+  geom_segment(data = survey.coords,
+               aes(x = long.W, y = lat.W,
+                   xend = long.E, yend = lat.E),
+               size = 0.1) +
+  # geom_text(data = transect.lines.latlon,
+  #           aes(x = lonOffshore,
+  #               y = latOffshore, label = lineID),
+  #           color = 'red')+
+  coord_map(ylim = c(32.57, 32.68),
+            xlim = c(-117.2, -117.08)) +
   xlab('') + ylab('')
 
-if (save.data){
-  saveRDS(search.area,
-          file = paste0("RDSfiles/SearchArea_", Sys.Date(), ".rds"))
-  saveRDS(transect.lines.latlon,
-          file = paste0("RDSfiles/TransectLines_", Sys.Date(), ".rds"))
-  saveRDS(all.coast.line.df,
-          file = paste0("RDSfiles/CoastLine_", Sys.Date(), ".rds"))
-}
-
+p.1
 
 if (save.image) {
-  ggsave(plot = p1,
-         dpi = dpi,
-         file = paste0('Figures/tracklines_SC_', SanClemente, '_',
-                       dlines, 'km_', Sys.Date(), '.png'))
+  ggsave(plot = p.1,
+         dpi = 600,
+         file = paste0('Figures/tracklines_', 
+                       dlines, 'm_', Sys.Date(), '.png'))
 
-  write.table(signif(transect.lines.latlon, digits = 6), sep = ',',
-            file = paste0('Data/tracklines_SC_', SanClemente, '_',
-                          dlines, 'km_', Sys.Date(), '.csv'),
+  write.table(signif(survey.coords, digits = 8), sep = ',',
+            file = paste0('data/tracklines_', 
+                          dlines, 'm_', Sys.Date(), '.csv'),
             append = F, quote = F, row.names = F, col.names = T)
 }
 
