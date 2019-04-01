@@ -1,5 +1,5 @@
 ---
-title: "R Notebook"
+title: "SDB E-W transect lines"
 output: html_notebook
 ---
 
@@ -45,15 +45,15 @@ SDBay.df <- broom::tidy(SDBay.gis)
 
 First line is defined by selecting the northern most latitude for transect lines and finding the longitude of the shore lines (both E and W). This is completed by using gIntersection.  The while loop continues until the new latitude is south of the southern limit. 
 ```{r}
-# N most latitude for transect lines
+# N/S most latitudes for transect lines
 N.most.lat <- 32.660
 S.most.lat <- 32.604
 
-# approximate center of the study area
-center.latlon <- data.frame(long = -117.128, lat = 32.6411)
+E.end <- -116
+W.end <- -118
 
 # create a line along this latitude (longitude values are arbitrary: wide enough to cover SDB):
-N.most.line <- SpatialLines(list(Lines(list(Line(data.frame(long = c(-118, -116),
+N.most.line <- SpatialLines(list(Lines(list(Line(data.frame(long = c(W.end, E.end),
                                                             lat = c(N.most.lat, N.most.lat)))), 
                                        ID = "Reference")),
                             proj4string = CRS("+proj=longlat +datum=WGS84"))
@@ -75,10 +75,11 @@ while (lat > S.most.lat){
   # find new latitude
   tmp.pt <- data.frame(destPoint(E.coords[k, ], 180, dlines))
   lat <- tmp.pt$lat
-  new.line <- SpatialLines(list(Lines(list(Line(data.frame(long = c(-118, -116),
+  new.line <- SpatialLines(list(Lines(list(Line(data.frame(long = c(W.end, E.end),
                                                            lat = c(lat, lat)))),
                                       ID = "a")),
                            proj4string = CRS("+proj=longlat +datum=WGS84"))
+  
   new.coords <- coordinates(gIntersection(SDBay.gis, new.line))
   new.coords.df <- data.frame(new.coords)
   
@@ -98,7 +99,7 @@ E.coords %>% transmute( long.E = long, lat.E = lat) -> E.coords
 dist.line <- distHaversine(W.coords, E.coords)
 
 # get rid of those that are < min.length m, then reorder lat/lon so that I can copy and paste
-# in Google Earth to plot end points easily
+# in Google Earth to plot end points easily (they like lat, long pairs, not long, lat)
 
 all.coords <- cbind(W.coords, E.coords, dist.line)
 all.coords %>% filter(dist.line > min.length) %>%
