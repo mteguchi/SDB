@@ -1,0 +1,152 @@
+---
+title: "Plot net locations"
+output: html_notebook
+---
+
+This document creates a map of lat-lon coordinates. This is used to figure out which coordinate pairs (or triplets) belong to which net in net forms.  
+
+```{r}
+rm(list=ls())
+
+library(rgdal)
+library(sp)
+library(geosphere)
+library(rgeos)
+library(tidyverse)
+library(RODBC)
+
+SWFSC <- F
+
+run.date <- "2019-04-04"
+water.color <- "lightblue"
+background.color <- "darkgray"
+eelgrass.color <- "lightgreen"
+
+
+```
+
+Get old lat-lon net locations
+```{r}
+if (SWFSC){
+  Turtle <- odbcConnect(dsn = 'Turtle', uid = '', pwd = '')
+  #Turtle.tbls <- sqlTables(Turtle)
+  Net.Info <- sqlQuery(Turtle,
+                       'select * from tbl_Net_Info') %>%
+  select(Field_Date, GPS_N, GPS_W)
+  odbcClose(Turtle)
+  
+  write.csv(Net.Info,
+            file = paste0("data/Net_Info_", Sys.Date(), ".csv"),
+            quote = F, row.names = F)
+
+} else {
+  # if not at SWFSC, use the local files.
+  Net.Info <- read.table(file = paste0("data/Net_Info_", run.date, ".csv"),
+                         header = T,
+                         sep = ",")
+  
+}
+
+```
+
+
+
+
+Provide new lat-lon pairs in the following dataframe.
+
+```{r}
+#date.select <- "2018-07-24"
+
+# latlons <- data.frame(date = "2018-08-09",
+#                       lat = 32 + c(0.61964, 0.61910, 0.61854, 0.61843, 0.61791, 0.61728),
+#                       long = -1 * (117 + c(0.10783, 0.10801, 0.10840, 0.10827, 0.10837, 0.10860)))
+
+# latlons <- data.frame(date = "2018-07-24",
+#                       lat = 32 + c(0.61850, 0.61834, 0.61801, 0.61798, 0.61712, 
+#                                    0.61757, 0.61860, 0.61809, 0.61750, 0.61843, 
+#                                    0.61797, 0.61729),
+#                       long = -1 * (117 + c(0.10340, 0.10337, 0.10351, 0.10387, 0.10472, 
+#                                            0.10434, 0.10623, 0.10604, 0.10608, 0.10698, 
+#                                            0.10722, 0.10743)))
+# 
+# latlons <- data.frame(date = "2018-07-12",
+#                       lat = 32 + c(0.61389, 0.61388, 0.61461, 0.61407, 0.61643, 
+#                                    0.61761, 0.61789, 0.61902),
+#                       long = -1 * (117 + c(0.09886, 0.09886, 0.09858, 0.09881, 0.10399, 
+#                                            0.10446, 0.10494, 0.10514)))
+
+# latlons <- data.frame(date = "2018-06-14",
+#                       lat = 32 + c(0.61481, 0.61426, 0.61798, 0.61738, 0.61678, 
+#                                    0.61661, 0.61609, 0.61608, 0.61561),
+#                       long = -1 * (117 + c(0.09919, 0.09945, 0.10375, 0.10359, 0.10348, 
+#                                            0.10348, 0.10300, 0.10303, 0.10272)))
+
+# latlons <- data.frame(date = "2018-05-31",
+#                       lat = 32 + c(0.61468, 0.61593, 0.61719, 0.61690, 0.61806, 
+#                                    0.61417, 0.61683),
+#                       long = -1 * (117 + c(0.09851, 0.10482, 0.10487, 0.10438, 0.10442, 
+#                                            0.9866, 0.10377)))
+
+# latlons <- data.frame(date = "2018-05-15",
+#                       lat = 32 + c(0.61532, 0.61624, 0.61647, 0.61699, 0.61763),
+#                       long = -1 * (117 + c(0.10353, 0.10358, 0.10353, 0.10365, 0.10353)))
+
+# latlons <- data.frame(date = "2018-04-26",
+#                       lat = 32 + c(0.61725, 0.61601, 0.61739, 0.61476, 0.61415,
+#                                    0.61443),
+#                       long = -1 * (117 + c(0.10500, 0.10507, 0.10507, 0.09920, 0.09930,
+#                                            0.09929)))
+
+latlons <- data.frame(date = "2018-08-22",
+                      lat = 32 + c(0.6177, 0.6183, 0.6171, 0.6186, 0.6192,
+                                   0.6180, 0.6165, 0.6163, 0.6168, 0.6144,
+                                   0.6146, 0.6141),
+                      long = -1 * (117 + c(0.1072, 0.1070, 0.1073, 0.1057, 0.1054,
+                                           0.1060, 0.1066, 0.1067, 0.1066, 0.0988,
+                                           0.0987, 0.0988)))
+
+# latlons <- data.frame(date = "2018-10-18",
+#                       lat = 32 + c(0.61801, 0.61834, 0.61773, 0.61705, 0.61770, 
+#                                    0.61647, 0.61711, 0.61631, 0.61785),
+#                       long = -1 * (117 + c(0.10362, 0.10368, 0.10383, 0.10413, 0.10407,
+#                                            0.10436, 0.10505, 0.10574, 0.10484)))
+
+latlons$ID <- seq(1, nrow(latlons))
+```
+
+
+```{r}
+# Bring in a map of SDB:
+SDBay.gis <- spTransform(readOGR(dsn = "GISfiles",
+                                            layer = "sd_bay",
+                                            verbose = FALSE),
+                             CRS("+proj=longlat +datum=WGS84"))
+
+SDBay.df <- broom::tidy(SDBay.gis)
+
+N.most.lat <- 32.630
+S.most.lat <- 32.610
+
+```
+
+Then plot:
+
+```{r}
+# make a plot
+p.1 <- ggplot() +
+ 
+  geom_polygon(data = SDBay.df,
+               aes(x = long, y = lat, group = group),
+               fill = water.color,
+               color = "black") +
+  geom_text(data = latlons,
+            aes(x = long, y = lat,
+                label = ID),
+            size = 3) +
+  coord_map(ylim = c(S.most.lat, N.most.lat),
+            xlim = c(-117.12, -117.095)) +
+  xlab('') + ylab('')
+
+print(p.1)
+```
+
