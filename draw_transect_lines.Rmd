@@ -9,9 +9,9 @@ First load necessary libraries.
 ```{r}
 rm(list=ls())
 save.image <- T
-ifelse(Sys.info()[1] == 'Linux',
-       source('~/Documents/R/tools/TomosFunctions.R'),
-       source('~/R/tools/TomosFunctions.R'))
+# ifelse(Sys.info()[1] == 'Linux',
+#        source('~/Documents/R/tools/TomosFunctions.R'),
+#        source('~/R/tools/TomosFunctions.R'))
 
 library(rgdal)
 library(sp)
@@ -19,7 +19,7 @@ library(geosphere)
 library(rgeos)
 library(tidyverse)
 
-dlines <- 100    # distance between lines in m
+dlines <- 500    # distance between lines in m
 min.length <- 500  # minimum line length in m
 
 water.color <- "lightblue"
@@ -35,9 +35,9 @@ First, bring in a shapefile for the bay and define a dataframe.
 
 # Bring in a map of SDB:
 SDBay.gis <- spTransform(readOGR(dsn = "GISfiles",
-                                            layer = "sd_bay",
-                                            verbose = FALSE),
-                             CRS("+proj=longlat +datum=WGS84"))
+                                 layer = "sd_bay",
+                                 verbose = FALSE),
+                         CRS("+proj=longlat +datum=WGS84"))
 
 SDBay.df <- broom::tidy(SDBay.gis)
 ```
@@ -46,7 +46,7 @@ SDBay.df <- broom::tidy(SDBay.gis)
 First line is defined by selecting the northern most latitude for transect lines and finding the longitude of the shore lines (both E and W). This is completed by using gIntersection.  The while loop continues until the new latitude is south of the southern limit. 
 ```{r}
 # N/S most latitudes for transect lines
-N.most.lat <- 32.660
+N.most.lat <- 32.670
 S.most.lat <- 32.604
 
 E.end <- -116
@@ -70,6 +70,7 @@ W.coords <- data.frame(long = N.coords.df[1, "x"],
                        lat = N.coords.df[1, "y"])
 
 lat <- E.coords$lat
+
 k <- 1
 while (lat > S.most.lat){
   # find new latitude
@@ -103,6 +104,7 @@ dist.line <- distHaversine(W.coords, E.coords)
 
 all.coords <- cbind(W.coords, E.coords, dist.line)
 all.coords %>% filter(dist.line > min.length) %>%
+  filter(lat.W > S.most.lat) %>%
   transmute(lat.W = lat.W, long.W = long.W,
             lat.E = lat.E, long.E = long.E,
             length = dist.line) -> survey.coords
@@ -111,6 +113,60 @@ survey.coords$ID <- seq(1, nrow(survey.coords))
 
 survey.coords %>% select(ID, lat.W, long.W, lat.E, long.E, length) -> survey.coords
 ```
+
+Add stations to every other line and create a random point on other lines. Avoid about 1/4 mile from either end, which is about 0.00417 degrees.
+
+```{r}
+
+station.coords <- data.frame(lineID = NA,
+                             ID = NA,
+                             lat = NA,
+                             lon = NA)
+
+random.coords <- data.frame(lineID = NA,
+                             ID = NA,
+                             lat = NA,
+                             lon = NA)
+
+dist.shore <- 1/(8 * 60)     # ~ 1/8 mile because 1/60 degrees (1 minute) is about a mile
+c2 <- c1 <- c <- 1
+
+set.seed(12345)
+for (c in 1:nrow(survey.coords)){
+  line.dist <- survey.coords[c, "long.E"] - survey.coords[c, "long.W"]
+  if (line.dist > (2*dist.shore)){
+    # find the middle point
+    mid.pt.lon <- survey.coords[c, "long.W"] + line.dist/2
+    
+    if (c %% 2 == 1){
+      
+      tmp.1 <- runif(n = 1, 
+                     min = (survey.coords[c, "long.W"] + dist.shore), 
+                     max = mid.pt.lon)
+      
+      tmp.2 <- runif(n = 1, 
+                     min = mid.pt.lon, 
+                     max = (survey.coords[c, "long.E"] - dist.shore))
+      station.coords[c1, ] <- c(survey.coords[c, "ID"], 1, survey.coords[c, "lat.W"], tmp.1)  
+      station.coords[c1+1, ] <- c(survey.coords[c, "ID"], 2, survey.coords[c, "lat.W"], tmp.2)  
+      c1 <- c1 + 2
+      
+    } else {
+      tmp <- runif(n = 12, min = (survey.coords[c, "long.W"] + dist.shore), 
+                   max = (survey.coords[c, "long.E"] - dist.shore))
+      for (k in 1:12){
+        random.coords[c2, ] <- c(survey.coords[c, "ID"], k, survey.coords[c, "lat.W"], tmp[k]) 
+        c2 <- c2 + 1
+      }
+    }
+    
+  }
+}
+
+
+```
+
+
 
 Once W and E ends are created, plot them on a map.
 
@@ -137,10 +193,16 @@ p.1 <- ggplot() +
                aes(x = long.W, y = lat.W,
                    xend = long.E, yend = lat.E),
                size = 0.1) +
-  # geom_text(data = transect.lines.latlon,
-  #           aes(x = lonOffshore,
-  #               y = latOffshore, label = lineID),
-  #           color = 'red')+
+  geom_point(data = station.coords,
+             aes(x = lon, y = lat)) + 
+  geom_point(data = random.coords,
+             aes(x = lon, y = lat),
+             color = "orange") + 
+  geom_text(data = survey.coords,
+            aes(x = long.W,
+                y = lat.W, label = ID),
+            color = 'red',
+            size = 4)+
   coord_map(ylim = c(32.57, 32.68),
             xlim = c(-117.2, -117.08)) +
   xlab('') + ylab('')
@@ -157,6 +219,15 @@ if (save.image) {
             file = paste0('data/tracklines_', 
                           dlines, 'm_', Sys.Date(), '.csv'),
             append = F, quote = F, row.names = F, col.names = T)
+  write.table(signif(station.coords, digits = 8), sep = ',',
+            file = paste0('data/stations_', 
+                          dlines, 'm_', Sys.Date(), '.csv'),
+            append = F, quote = F, row.names = F, col.names = T)
+  write.table(signif(random.coords, digits = 8), sep = ',',
+            file = paste0('data/random_', 
+                          dlines, 'm_', Sys.Date(), '.csv'),
+            append = F, quote = F, row.names = F, col.names = T)
+  
 }
 
 ```
