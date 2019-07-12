@@ -128,7 +128,7 @@ random.coords <- data.frame(lineID = NA,
                              lat = NA,
                              lon = NA)
 
-dist.shore <- 1/(8 * 60)     # ~ 1/8 mile because 1/60 degrees (1 minute) is about a mile
+dist.shore <- 1/(32 * 60)     # ~ 1/8 mile because 1/60 degrees (1 minute) is about a mile
 c2 <- c1 <- c <- 1
 
 set.seed(12345)
