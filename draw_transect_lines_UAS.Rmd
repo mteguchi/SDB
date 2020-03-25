@@ -3,12 +3,12 @@ title: "SDB E-W transect lines"
 output: html_notebook
 ---
 
-This document describes drawing transect lines within SDB for habitat sampling.
+This document describes drawing transect lines within SDB for UAS sampling.
 
 First load necessary libraries.
 ```{r}
 rm(list=ls())
-save.image <- T
+save.image <- F
 # ifelse(Sys.info()[1] == 'Linux',
 #        source('~/Documents/R/tools/TomosFunctions.R'),
 #        source('~/R/tools/TomosFunctions.R'))
@@ -19,8 +19,15 @@ library(geosphere)
 library(rgeos)
 library(tidyverse)
 
-dlines <- 500    # distance between lines in m
+dlines <- 300    # distance between lines in m
 min.length <- 500  # minimum line length in m
+
+N.most.lat <- 32.622 #32.650
+S.most.lat <- 32.604
+
+E.end <- -116
+W.end <- -118
+
 
 water.color <- "lightblue"
 background.color <- "darkgray"
@@ -46,12 +53,6 @@ SDBay.df <- broom::tidy(SDBay.gis)
 First line is defined by selecting the northern most latitude for transect lines and finding the longitude of the shore lines (both E and W). This is completed by using gIntersection.  The while loop continues until the new latitude is south of the southern limit. 
 ```{r}
 # N/S most latitudes for transect lines
-N.most.lat <- 32.670
-S.most.lat <- 32.604
-
-E.end <- -116
-W.end <- -118
-
 # create a line along this latitude (longitude values are arbitrary: wide enough to cover SDB):
 N.most.line <- SpatialLines(list(Lines(list(Line(data.frame(long = c(W.end, E.end),
                                                             lat = c(N.most.lat, N.most.lat)))), 
@@ -114,57 +115,6 @@ survey.coords$ID <- seq(1, nrow(survey.coords))
 survey.coords %>% select(ID, lat.W, long.W, lat.E, long.E, length) -> survey.coords
 ```
 
-Add stations to every other line and create a random point on other lines. Avoid about 1/4 mile from either end, which is about 0.00417 degrees.
-
-```{r}
-
-station.coords <- data.frame(lineID = NA,
-                             ID = NA,
-                             lat = NA,
-                             lon = NA)
-
-random.coords <- data.frame(lineID = NA,
-                             ID = NA,
-                             lat = NA,
-                             lon = NA)
-
-dist.shore <- 1/(32 * 60)     # ~ 1/8 mile because 1/60 degrees (1 minute) is about a mile
-c2 <- c1 <- c <- 1
-
-set.seed(12345)
-for (c in 1:nrow(survey.coords)){
-  line.dist <- survey.coords[c, "long.E"] - survey.coords[c, "long.W"]
-  if (line.dist > (2*dist.shore)){
-    # find the middle point
-    mid.pt.lon <- survey.coords[c, "long.W"] + line.dist/2
-    
-    if (c %% 2 == 1){
-      
-      tmp.1 <- runif(n = 1, 
-                     min = (survey.coords[c, "long.W"] + dist.shore), 
-                     max = mid.pt.lon)
-      
-      tmp.2 <- runif(n = 1, 
-                     min = mid.pt.lon, 
-                     max = (survey.coords[c, "long.E"] - dist.shore))
-      station.coords[c1, ] <- c(survey.coords[c, "ID"], 1, survey.coords[c, "lat.W"], tmp.1)  
-      station.coords[c1+1, ] <- c(survey.coords[c, "ID"], 2, survey.coords[c, "lat.W"], tmp.2)  
-      c1 <- c1 + 2
-      
-    } else {
-      tmp <- runif(n = 12, min = (survey.coords[c, "long.W"] + dist.shore), 
-                   max = (survey.coords[c, "long.E"] - dist.shore))
-      for (k in 1:12){
-        random.coords[c2, ] <- c(survey.coords[c, "ID"], k, survey.coords[c, "lat.W"], tmp[k]) 
-        c2 <- c2 + 1
-      }
-    }
-    
-  }
-}
-
-
-```
 
 
 
@@ -192,12 +142,8 @@ p.1 <- ggplot() +
   geom_segment(data = survey.coords,
                aes(x = long.W, y = lat.W,
                    xend = long.E, yend = lat.E),
-               size = 0.1) +
-  geom_point(data = station.coords,
-             aes(x = lon, y = lat)) + 
-  geom_point(data = random.coords,
-             aes(x = lon, y = lat),
-             color = "orange") + 
+               size = 0.5,
+               color = "darkgreen") +
   geom_text(data = survey.coords,
             aes(x = long.W,
                 y = lat.W, label = ID),
@@ -212,22 +158,14 @@ p.1
 if (save.image) {
   ggsave(plot = p.1,
          dpi = 600,
-         file = paste0('figures/tracklines_', 
+         file = paste0('figures/UAS_tracklines_', 
                        dlines, 'm_', Sys.Date(), '.png'))
 
   write.table(signif(survey.coords, digits = 8), sep = ',',
-            file = paste0('data/tracklines_', 
+            file = paste0('data/UAS_tracklines_', 
                           dlines, 'm_', Sys.Date(), '.csv'),
             append = F, quote = F, row.names = F, col.names = T)
-  write.table(signif(station.coords, digits = 8), sep = ',',
-            file = paste0('data/stations_', 
-                          dlines, 'm_', Sys.Date(), '.csv'),
-            append = F, quote = F, row.names = F, col.names = T)
-  write.table(signif(random.coords, digits = 8), sep = ',',
-            file = paste0('data/random_', 
-                          dlines, 'm_', Sys.Date(), '.csv'),
-            append = F, quote = F, row.names = F, col.names = T)
-  
+
 }
 
 ```
